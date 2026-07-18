@@ -1,11 +1,9 @@
 pipeline {
     agent none
-
     tools {
         maven 'Maven-3.9.0'
         jdk 'JDK-21'
     }
-
     parameters {
         string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to build')
         choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'uat', 'prod'], description: 'Deployment Environment')
@@ -15,7 +13,6 @@ pipeline {
             description: 'Comma-separated list of stages to run'
         )
     }
-
     environment {
         AWS_REGION     = "ap-south-1"
         AWS_ACCOUNT_ID = "123456789012"
@@ -26,161 +23,77 @@ pipeline {
         IMAGE_TAG      = "${BUILD_NUMBER}"
         EMAIL_TO       = "devops-team@company.com"
     }
-
     options {
         timestamps()
         disableConcurrentBuilds()
         timeout(time: 60, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
-
     stages {
         stage('Checkout') {
-            when {
-                expression { maven_webapp.isStageEnabled('Checkout', params.STAGE_LIST) }
-            }
-            agent { label 'build-agent' }
             steps {
-                script {
-                    maven_webapp.checkout(
-                        branch: params.GIT_BRANCH,
-                        url: 'https://github.com/company/payment-app.git',
-                        credentialsId: 'git-creds'
-                    )
-                }
+                git branch: params.GIT_BRANCH,
+                    credentialsId: 'git-creds',
+                    url: 'https://github.com/company/payment-app.git'
             }
         }
-
         stage('Build') {
-            when {
-                expression { maven_webapp.isStageEnabled('Build', params.STAGE_LIST) }
-            }
-            agent { label 'build-agent' }
             steps {
-                script {
-                    maven_webapp.build(skipTests: true)
-                }
+                sh 'mvn clean package -DskipTests'
             }
         }
-
         stage('SonarQube Analysis') {
-            when {
-                expression { maven_webapp.isStageEnabled('SonarQube Analysis', params.STAGE_LIST) }
-            }
-            agent { label 'build-agent' }
             steps {
-                script {
-                    maven_webapp.sonarAnalysis(
-                        sonarServer: 'SonarQube',
-                        projectKey: 'payment-app'
-                    )
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=payment-app'
                 }
             }
         }
-
-        stage('Quality Gate') {
-            when {
-                expression { maven_webapp.isStageEnabled('Quality Gate', params.STAGE_LIST) }
-            }
-            agent { label 'sonar' }
-            steps {
-                script {
-                    maven_webapp.qualityGate(timeoutMinutes: 10, abortPipeline: true)
-                }
-            }
-        }
-
         stage('Docker Build') {
-            when {
-                expression { maven_webapp.isStageEnabled('Docker Build', params.STAGE_LIST) }
-            }
-            agent { label 'docker-agent' }
             steps {
-                script {
-                    maven_webapp.dockerBuild(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
-                }
+                sh "docker build -t ${env.ECR_URI}:${env.IMAGE_TAG} ."
             }
         }
-
         stage('Trivy Scan') {
-            when {
-                expression { maven_webapp.isStageEnabled('Trivy Scan', params.STAGE_LIST) }
-            }
-            agent { label 'docker-agent' }
             steps {
-                script {
-                    maven_webapp.trivyScan(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
-                }
+                sh "trivy image --severity HIGH,CRITICAL ${env.ECR_URI}:${env.IMAGE_TAG}"
             }
         }
-
         stage('Push Docker Image') {
-            when {
-                expression { maven_webapp.isStageEnabled('Push Docker Image', params.STAGE_LIST) }
-            }
-            agent { label 'docker-agent' }
             steps {
-                script {
-                    maven_webapp.pushDockerImage(
-                        credentialsId: 'aws-creds',
-                        awsRegion: env.AWS_REGION,
-                        imageUri: env.ECR_URI,
-                        imageTag: env.IMAGE_TAG
-                    )
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                    sh """
+                        aws ecr get-login-password --region ${env.AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${env.ECR_URI}
+                        docker push ${env.ECR_URI}:${env.IMAGE_TAG}
+                    """
                 }
             }
         }
-
-        stage('Helm Package') {
-            when {
-                expression { maven_webapp.isStageEnabled('Helm Package', params.STAGE_LIST) }
-            }
-            agent { label 'helm-agent' }
+        stage('Helm Package & Push Helm Chart') {
             steps {
-                script {
-                    maven_webapp.helmPackage(chartPath: 'helm/payment')
-                }
+                sh """
+                    helm dependency update helm/payment
+                    helm package helm/payment
+                    aws ecr get-login-password --region ${env.AWS_REGION} | \
+                    helm registry login --username AWS --password-stdin ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com
+                    helm push *.tgz oci://${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/
+                """
             }
         }
-
-        stage('Push Helm Chart') {
-            when {
-                expression { maven_webapp.isStageEnabled('Push Helm Chart', params.STAGE_LIST) }
-            }
-            agent { label 'helm-agent' }
-            steps {
-                script {
-                    maven_webapp.pushHelmChart(
-                        credentialsId: 'aws-creds',
-                        awsRegion: env.AWS_REGION,
-                        helmRegistry: "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com",
-                        chartFile: 'helm/payment-*.tgz'
-                    )
-                }
-            }
-        }
-
         stage('Deploy to EKS') {
-            when {
-                expression { maven_webapp.isStageEnabled('Deploy to EKS', params.STAGE_LIST) }
-            }
-            agent { label 'deploy-agent' }
             steps {
-                script {
-                    maven_webapp.deployToEks(
-                        awsRegion: env.AWS_REGION,
-                        eksCluster: env.EKS_CLUSTER,
-                        releaseName: 'payment',
-                        helmRegistry: "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/payment-charts",
-                        namespace: 'payment',
-                        imageUri: env.ECR_URI,
-                        imageTag: env.IMAGE_TAG
-                    )
-                }
+                sh """
+                    aws eks update-kubeconfig --region ${env.AWS_REGION} --name ${env.EKS_CLUSTER}
+                    helm upgrade --install payment \
+                        oci://${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/payment-charts \
+                        --namespace payment --create-namespace \
+                        --set image.repository=${env.ECR_URI} \
+                        --set image.tag=${env.IMAGE_TAG}
+                """
             }
         }
     }
-
     post {
         success {
             emailext(

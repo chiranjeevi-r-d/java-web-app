@@ -38,12 +38,12 @@ pipeline {
     stages {
         stage('Checkout') {
             when {
-                expression { maven_webapp.isStageEnabled('Checkout', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Checkout', params.STAGE_LIST) }
             }
             agent { label 'build-agent' }
             steps {
                 script {
-                    maven_webapp.checkout(
+                    mavenWebApp.checkout(
                         branch: params.GIT_BRANCH,
                         url: 'https://github.com/company/payment-app.git',
                         credentialsId: 'git-creds'
@@ -54,24 +54,24 @@ pipeline {
 
         stage('Build') {
             when {
-                expression { maven_webapp.isStageEnabled('Build', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Build', params.STAGE_LIST) }
             }
             agent { label 'build-agent' }
             steps {
                 script {
-                    maven_webapp.build(skipTests: true)
+                    mavenWebApp.build(skipTests: true)
                 }
             }
         }
 
         stage('SonarQube Analysis') {
             when {
-                expression { maven_webapp.isStageEnabled('SonarQube Analysis', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('SonarQube Analysis', params.STAGE_LIST) }
             }
             agent { label 'build-agent' }
             steps {
                 script {
-                    maven_webapp.sonarAnalysis(
+                    mavenWebApp.sonarAnalysis(
                         sonarServer: 'SonarQube',
                         projectKey: 'payment-app'
                     )
@@ -81,48 +81,48 @@ pipeline {
 
         stage('Quality Gate') {
             when {
-                expression { maven_webapp.isStageEnabled('Quality Gate', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Quality Gate', params.STAGE_LIST) }
             }
             agent { label 'sonar' }
             steps {
                 script {
-                    maven_webapp.qualityGate(timeoutMinutes: 10, abortPipeline: true)
+                    mavenWebApp.qualityGate(timeoutMinutes: 10, abortPipeline: true)
                 }
             }
         }
 
         stage('Docker Build') {
             when {
-                expression { maven_webapp.isStageEnabled('Docker Build', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Docker Build', params.STAGE_LIST) }
             }
             agent { label 'docker-agent' }
             steps {
                 script {
-                    maven_webapp.dockerBuild(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
+                    mavenWebApp.dockerBuild(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
                 }
             }
         }
 
         stage('Trivy Scan') {
             when {
-                expression { maven_webapp.isStageEnabled('Trivy Scan', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Trivy Scan', params.STAGE_LIST) }
             }
             agent { label 'docker-agent' }
             steps {
                 script {
-                    maven_webapp.trivyScan(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
+                    mavenWebApp.trivyScan(imageUri: env.ECR_URI, imageTag: env.IMAGE_TAG)
                 }
             }
         }
 
         stage('Push Docker Image') {
             when {
-                expression { maven_webapp.isStageEnabled('Push Docker Image', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Push Docker Image', params.STAGE_LIST) }
             }
             agent { label 'docker-agent' }
             steps {
                 script {
-                    maven_webapp.pushDockerImage(
+                    mavenWebApp.pushDockerImage(
                         credentialsId: 'aws-creds',
                         awsRegion: env.AWS_REGION,
                         imageUri: env.ECR_URI,
@@ -134,24 +134,24 @@ pipeline {
 
         stage('Helm Package') {
             when {
-                expression { maven_webapp.isStageEnabled('Helm Package', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Helm Package', params.STAGE_LIST) }
             }
             agent { label 'helm-agent' }
             steps {
                 script {
-                    maven_webapp.helmPackage(chartPath: 'helm/payment')
+                    mavenWebApp.helmPackage(chartPath: 'helm/payment')
                 }
             }
         }
 
         stage('Push Helm Chart') {
             when {
-                expression { maven_webapp.isStageEnabled('Push Helm Chart', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Push Helm Chart', params.STAGE_LIST) }
             }
             agent { label 'helm-agent' }
             steps {
                 script {
-                    maven_webapp.pushHelmChart(
+                    mavenWebApp.pushHelmChart(
                         credentialsId: 'aws-creds',
                         awsRegion: env.AWS_REGION,
                         helmRegistry: "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com",
@@ -163,12 +163,12 @@ pipeline {
 
         stage('Deploy to EKS') {
             when {
-                expression { maven_webapp.isStageEnabled('Deploy to EKS', params.STAGE_LIST) }
+                expression { mavenWebApp.isStageEnabled('Deploy to EKS', params.STAGE_LIST) }
             }
             agent { label 'deploy-agent' }
             steps {
                 script {
-                    maven_webapp.deployToEks(
+                    mavenWebApp.deployToEks(
                         awsRegion: env.AWS_REGION,
                         eksCluster: env.EKS_CLUSTER,
                         releaseName: 'payment',

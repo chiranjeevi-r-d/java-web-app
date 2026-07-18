@@ -99,9 +99,9 @@ pipeline {
             emailext(
                 subject: "SUCCESS: ${JOB_NAME}-${BUILD_NUMBER}",
                 body: """Build Successful
-Job: ${JOB_NAME}
-Build: ${BUILD_NUMBER}
-Image: ${ECR_URI}:${IMAGE_TAG}""",
+                Job: ${JOB_NAME}
+                Build: ${BUILD_NUMBER}
+                Image: ${ECR_URI}:${IMAGE_TAG}""",
                 to: "${EMAIL_TO}"
             )
         }

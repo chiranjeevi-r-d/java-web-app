@@ -1,4 +1,3 @@
-@Library('payment-shared-lib@main') _
 pipeline {
     agent none
 

@@ -63,6 +63,15 @@ pipeline {
                 }
             }
         }
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    //pauses the pipeline (without polling) until SonarQube's webhook reports pass or fail
+                    //abortPipeline: true stops the build immediately on a failed gate so a broken artifact never reaches Docker build or deployment.
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
         stage('Docker Build') {
             steps {
                 sh "docker build -t ${env.ECR_URI}:${env.IMAGE_TAG} ."

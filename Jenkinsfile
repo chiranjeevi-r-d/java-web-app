@@ -56,7 +56,7 @@ pipeline {
                 }
             }
         }
-        stage('SonarQube Analysis') {
+        stage('SAST-SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh 'mvn sonar:sonar -Dsonar.projectKey=payment-app'
@@ -72,6 +72,23 @@ pipeline {
                 }
             }
         }
+        stage('OWASP Dependency Check') {
+            steps {
+                sh """
+                    dependency-check.sh \
+                        --project 'payment-app' \
+                        --scan . \
+                        --format JSON \
+                        --out dependency-check-results \
+                        --fail true
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'dependency-check-results/dependency-check-report.json', allowEmptyArchive: true
+                }
+            }
+        }
         stage('Docker Build') {
             steps {
                 sh "docker build -t ${env.ECR_URI}:${env.IMAGE_TAG} ."
@@ -79,7 +96,30 @@ pipeline {
         }
         stage('Trivy Scan') {
             steps {
-                sh "trivy image --severity HIGH,CRITICAL ${env.ECR_URI}:${env.IMAGE_TAG}"
+                sh "trivy image --exit-code 1 --severity HIGH,CRITICAL -f trivy_results_${BUILD_NUMBER}.json ${env.ECR_URI}:${env.IMAGE_TAG}"
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "trivy_results_${BUILD_NUMBER}.json", allowEmptyArchive: true
+                }
+            }
+        }
+        stage('DAST-OWASP ZAP Scan') {
+            steps {
+                sh """
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v ${WORKSPACE}/zap-results:/zap/results \
+                        owasp/zap2docker-stable zap-baseline.py \
+                        -t http://localhost:8080 \
+                        -r zap-baseline-report.html \
+                        -J zap-results.json
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'zap-results/*.html,zap-results/*.json', allowEmptyArchive: true
+                }
             }
         }
         stage('Push Docker Image') {

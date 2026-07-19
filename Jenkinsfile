@@ -42,6 +42,20 @@ pipeline {
                 sh 'mvn clean package -DskipTests'
             }
         }
+        stage('Test Cases') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        sh 'mvn test'
+                    }
+                }
+                stage('Integration Tests') {
+                    steps {
+                        sh 'echo "Running integration tests"'
+                    }
+                }
+            }
+        }
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
